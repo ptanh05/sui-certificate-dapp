@@ -18,11 +18,8 @@ import {
 import Navbar from "@/components/navbar";
 import { useWalletKit } from "@mysten/wallet-kit";
 import { TransactionBlock } from "@mysten/sui.js/transactions";
-import {
-  getFullnodeUrl,
-  SuiClient,
-  SuiObjectResponse,
-} from "@mysten/sui/client";
+import { SuiObjectResponse } from "@mysten/sui/client";
+import { client } from "../lib/suiClient"; // Đường dẫn có thể cần điều chỉnh
 import InstitutionList from "@/components/InstitutionList";
 import { PACKAGE_ID, MODULE_NAME } from "@/constants/contract";
 import {
@@ -74,15 +71,6 @@ interface Transaction {
 
 // Export interface để có thể dùng ở component khác
 export type { Institution };
-
-// Sử dụng getFullnodeUrl để xác định vị trí RPC (Devnet, Testnet, v.v.)
-const rpcUrl = getFullnodeUrl("testnet");
-
-// Tạo một client kết nối đến devnet
-const client = new SuiClient({ url: rpcUrl });
-
-// Export đối tượng client nếu cần sử dụng ở nơi khác
-export { client };
 
 export default function HomePage() {
   const { currentAccount, signAndExecuteTransactionBlock } = useWalletKit();
