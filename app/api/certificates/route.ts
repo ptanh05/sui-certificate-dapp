@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     console.log("Certificate created:", result[0]);
 
     return NextResponse.json({ success: true, certificate: result[0] });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error creating certificate:", error);
     return NextResponse.json(
       { error: "Failed to create certificate" },
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ certificates: result });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error fetching certificates:", error);
     return NextResponse.json(
       { error: "Failed to fetch certificates" },

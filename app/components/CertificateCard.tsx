@@ -14,9 +14,14 @@ interface Certificate {
   created_at: string;
 }
 
+interface Transaction {
+  description?: string;
+  // Thêm các trường khác của transaction nếu cần
+}
+
 interface CertificateCardProps {
   certificate: Certificate;
-  transactionMap: Record<string, any>;
+  transactionMap: Record<string, Transaction>;
   onCopy: (text: string) => void;
 }
 
@@ -136,7 +141,7 @@ export default function CertificateCard({
             <span className="text-gray-500">ID: {id}</span>
             <div className="flex items-center gap-2">
               {Object.entries(transactionMap).map(
-                ([txHash, tx]: [string, any]) => {
+                ([txHash, tx]: [string, Transaction]) => {
                   const description = tx.description || "";
                   if (
                     description.includes(recipient_name) &&

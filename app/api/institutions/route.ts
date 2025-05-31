@@ -3,6 +3,11 @@ import { neon } from "@neondatabase/serverless";
 
 const sql = neon(process.env.DATABASE_URL!);
 
+interface ApiError extends Error {
+  code?: string;
+  message: string;
+}
+
 export async function POST(request: NextRequest) {
   let transactionStarted = false;
   try {
@@ -155,11 +160,12 @@ export async function POST(request: NextRequest) {
         message: "Institution registered successfully"
       });
 
-    } catch (dbError: any) {
+    } catch (dbError: unknown) {
       console.error("[Institution API] Database error:", dbError);
       await sql`ROLLBACK;`;
       
-      if (dbError.code === '23505') { // Unique violation
+      const errorWithCode = dbError as { code?: string };
+      if (errorWithCode.code === '23505') { // Unique violation
         return NextResponse.json(
           { error: "Email này đã được đăng ký bởi tổ chức khác" },
           { status: 400 }
@@ -169,16 +175,17 @@ export async function POST(request: NextRequest) {
       throw dbError;
     }
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[Institution API] Error:", error);
     if (transactionStarted) {
       await sql`ROLLBACK;`;
     }
     
+    const apiError = error as ApiError;
     return NextResponse.json(
       { 
-        error: error.message || "An unexpected error occurred while processing institution",
-        details: error.code || "Unknown error code"
+        error: apiError.message || "An unexpected error occurred while processing institution",
+        details: apiError.code || "Unknown error code"
       },
       { status: 500 }
     );

@@ -7,21 +7,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import {
   Building,
   Wallet,
   Plus,
   FileQuestion,
-  Link,
   RefreshCw,
   Search,
 } from "lucide-react";
 import Navbar from "@/components/navbar";
 import { useWalletKit } from "@mysten/wallet-kit";
 import { TransactionBlock } from "@mysten/sui.js/transactions";
-import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
-import { getFaucetHost, requestSuiFromFaucetV2 } from "@mysten/sui/faucet";
+import {
+  getFullnodeUrl,
+  SuiClient,
+  SuiObjectResponse,
+} from "@mysten/sui/client";
 import InstitutionList from "@/components/InstitutionList";
 import { PACKAGE_ID, MODULE_NAME } from "@/constants/contract";
 import {
@@ -39,8 +40,37 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { Calendar, FileText } from "lucide-react";
 import CertificateCard from "@/app/components/CertificateCard";
+
+// Add interfaces for types
+interface Certificate {
+  id: number;
+  recipient_name: string;
+  course_name: string;
+  institution_name: string;
+  recipient_wallet_address: string;
+  issue_date: string;
+  completion_date: string;
+  description: string | null;
+  created_at: string;
+}
+
+interface Institution {
+  id: number;
+  institution_name: string;
+  email: string;
+  website: string;
+  wallet_address: string;
+  created_at: string;
+}
+
+interface Transaction {
+  txHash: string;
+  description?: string;
+  status: boolean;
+  transaction_type: string;
+  wallet_address: string;
+}
 
 // Sử dụng getFullnodeUrl để xác định vị trí RPC (Devnet, Testnet, v.v.)
 const rpcUrl = getFullnodeUrl("testnet");
@@ -51,65 +81,164 @@ const client = new SuiClient({ url: rpcUrl });
 // Export đối tượng client nếu cần sử dụng ở nơi khác
 export { client };
 
-// Thêm hàm helper để rút gọn địa chỉ ví
-const shortenAddress = (address: string) => {
-  if (!address) return "";
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-};
-
-// Thêm hàm copy to clipboard
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    alert("Đã sao chép vào clipboard!");
-  } catch (err) {
-    console.error("Lỗi khi sao chép:", err);
-  }
-};
-
 export default function HomePage() {
   const { currentAccount, signAndExecuteTransactionBlock } = useWalletKit();
   const [loading, setLoading] = useState(false);
-  const [certificates, setCertificates] = useState<any[]>([]);
-  const [institutions, setInstitutions] = useState<any[]>([]);
-  const [userInstitution, setUserInstitution] = useState<any>(null);
-  const [filteredCertificates, setFilteredCertificates] = useState<any[]>([]);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [userInstitution, setUserInstitution] = useState<Institution | null>(
+    null
+  );
+  const [filteredCertificates, setFilteredCertificates] = useState<
+    Certificate[]
+  >([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedInstitution, setSelectedInstitution] = useState("all");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const [transactionMap, setTransactionMap] = useState<Record<string, any>>({});
+  const [transactionMap, setTransactionMap] = useState<
+    Record<string, Transaction>
+  >({});
 
-  // Lấy dữ liệu khi tài khoản kết nối
-  useEffect(() => {
-    if (currentAccount) {
-      fetchCertificates();
-      fetchInstitutions();
-      checkUserInstitution();
-      fetchTransaction();
+  // Define all functions first
+  const fetchCertificates = useCallback(async () => {
+    if (!currentAccount) return;
+    try {
+      const response = await fetch("/api/certificates");
+      const data = await response.json();
+      setCertificates(data.certificates || []);
+
+      try {
+        const objects = await client.getOwnedObjects({
+          owner: currentAccount.address,
+          options: { showContent: true, showType: true },
+        });
+        const nftObjects = objects.data.filter((obj: SuiObjectResponse) => {
+          const type = obj.data?.type;
+          return type && type.includes("devnet_nft::DevNetNFT");
+        });
+        console.log("Found NFTs on chain:", nftObjects.length);
+      } catch (chainError) {
+        console.error("Error fetching from chain:", chainError);
+      }
+    } catch (error) {
+      console.error("Error fetching certificates:", error);
     }
   }, [currentAccount]);
 
-  // Thêm useEffect để tạo user khi kết nối ví
+  const checkUserInstitution = useCallback(async () => {
+    if (!currentAccount) return;
+    try {
+      console.log(
+        "[Frontend] Checking user institution for wallet:",
+        currentAccount.address
+      );
+      const response = await fetch(
+        `/api/institutions?wallet_address=${currentAccount.address}`
+      );
+      const data = await response.json();
+      console.log("[Frontend] Institution check response:", data);
+
+      if (data.institution) {
+        console.log("[Frontend] Found institution:", data.institution);
+        setUserInstitution(data.institution);
+      } else {
+        console.log("[Frontend] No institution found");
+        setUserInstitution(null);
+      }
+    } catch (error) {
+      console.error("[Frontend] Error checking institution:", error);
+      setUserInstitution(null);
+    }
+  }, [currentAccount]);
+
+  const fetchInstitutions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/institutions");
+      const data = await response.json();
+      setInstitutions(data.institutions || []);
+    } catch (error) {
+      console.error("Error fetching institutions:", error);
+    }
+  }, []);
+
+  const createInstitutionCap = useCallback(
+    async (institutionName: string) => {
+      if (!currentAccount) {
+        alert("Vui lòng kết nối ví Sui trước");
+        return;
+      }
+      try {
+        const tx = new TransactionBlock();
+        tx.moveCall({
+          target: `${PACKAGE_ID}::${MODULE_NAME}::create_institution_cap`,
+          arguments: [tx.pure(institutionName)],
+        });
+
+        const result = await signAndExecuteTransactionBlock({
+          transactionBlock: tx as unknown as Parameters<
+            typeof signAndExecuteTransactionBlock
+          >[0]["transactionBlock"],
+        });
+
+        if (!result) {
+          throw new Error("Transaction failed");
+        }
+
+        await fetch("/api/transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet_address: currentAccount.address,
+            transaction_type: "create_institution",
+            txHash: result.digest,
+            status: true,
+            description: `Create institution: ${institutionName}`,
+          }),
+        });
+
+        return result;
+      } catch (error) {
+        console.error("Error creating institution capability:", error);
+        throw error;
+      }
+    },
+    [currentAccount, signAndExecuteTransactionBlock]
+  );
+
+  // Then define useEffect hooks
+  useEffect(() => {
+    if (currentAccount) {
+      const fetchData = async () => {
+        await Promise.all([
+          fetchCertificates(),
+          fetchInstitutions(),
+          checkUserInstitution(),
+          fetchTransaction(),
+        ]);
+      };
+      fetchData();
+    }
+  }, [
+    currentAccount,
+    fetchCertificates,
+    fetchInstitutions,
+    checkUserInstitution,
+  ]);
+
   useEffect(() => {
     const initializeUser = async () => {
       if (currentAccount) {
-        // Kiểm tra user đã tồn tại chưa
         const existingUser = await fetchUser(currentAccount.address);
-
-        // Nếu chưa có user, tạo mới
         if (!existingUser) {
           console.log("Creating new user for wallet:", currentAccount.address);
           await createUser(currentAccount.address);
         }
       }
     };
-
     initializeUser();
-  }, [currentAccount]); // Chạy khi currentAccount thay đổi (khi kết nối ví)
+  }, [currentAccount]);
 
-  // Thêm useEffect để kiểm tra institution
   useEffect(() => {
     if (currentAccount) {
       console.log("[Frontend] Wallet connected, checking institution...");
@@ -118,7 +247,7 @@ export default function HomePage() {
       console.log("[Frontend] No wallet connected, clearing institution");
       setUserInstitution(null);
     }
-  }, [currentAccount]); // Chạy khi currentAccount thay đổi
+  }, [currentAccount, checkUserInstitution]);
 
   // Khởi tạo state cho form tạo certificate
   const defaultCertificateForm = {
@@ -204,7 +333,9 @@ export default function HomePage() {
 
       // Ký và thực thi transaction
       const result = await signAndExecuteTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as unknown as Parameters<
+          typeof signAndExecuteTransactionBlock
+        >[0]["transactionBlock"],
         options: {
           showInput: true,
           showEffects: true,
@@ -268,15 +399,17 @@ export default function HomePage() {
           }),
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error creating certificate:", error);
-      if (error?.message?.includes("User rejection")) {
+      const apiError = error as { message?: string };
+      if (apiError?.message?.includes("User rejection")) {
         alert(
           "Bạn đã từ chối ký transaction. Vui lòng thử lại và chấp nhận trong ví Sui."
         );
       } else {
         alert(
-          "Failed to create certificate: " + (error?.message || "Unknown error")
+          "Failed to create certificate: " +
+            (apiError?.message || "Unknown error")
         );
       }
     } finally {
@@ -387,117 +520,12 @@ export default function HomePage() {
       setInstitutionForm(defaultInstitutionForm);
       await fetchInstitutions();
       await checkUserInstitution();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[Frontend] Error handling institution:", error);
-      alert(error.message || "Failed to process institution registration");
+      const apiError = error as { message?: string };
+      alert(apiError?.message || "Failed to process institution registration");
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Hàm lấy danh sách certificates từ API
-  const fetchCertificates = async () => {
-    if (!currentAccount) return;
-    try {
-      // Lấy dữ liệu certificate từ cơ sở dữ liệu
-      const response = await fetch("/api/certificates");
-      const data = await response.json();
-      setCertificates(data.certificates || []);
-
-      // Lấy các NFT từ blockchain
-      try {
-        const objects = await client.getOwnedObjects({
-          owner: currentAccount.address,
-          options: { showContent: true, showType: true },
-        });
-        const nftObjects = objects.data.filter(
-          (obj: any) =>
-            obj.data?.type && obj.data.type.includes("devnet_nft::DevNetNFT")
-        );
-        console.log("Found NFTs on chain:", nftObjects.length);
-      } catch (chainError) {
-        console.error("Error fetching from chain:", chainError);
-      }
-    } catch (error) {
-      console.error("Error fetching certificates:", error);
-    }
-  };
-
-  const createInstitutionCap = async (institutionName: string) => {
-    if (!currentAccount) {
-      alert("Vui lòng kết nối ví Sui trước");
-      return;
-    }
-    try {
-      const tx = new TransactionBlock();
-      tx.moveCall({
-        target: `${PACKAGE_ID}::${MODULE_NAME}::create_institution_cap`,
-        arguments: [tx.pure(institutionName)],
-      });
-
-      const result = await signAndExecuteTransactionBlock({
-        transactionBlock: tx,
-      });
-
-      if (!result) {
-        throw new Error("Transaction failed");
-      }
-
-      // Thêm đoạn này sau khi tạo institution thành công
-      // Lưu transaction vào database
-      await fetch("/api/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: currentAccount.address,
-          transaction_type: "create_institution",
-          txHash: result.digest,
-          status: true,
-          description: `Create institution: ${institutionName}`,
-        }),
-      });
-
-      return result;
-    } catch (error) {
-      console.error("Error creating institution capability:", error);
-      throw error;
-    }
-  };
-
-  // Hàm lấy danh sách institutions từ API
-  const fetchInstitutions = async () => {
-    try {
-      const response = await fetch("/api/institutions");
-      const data = await response.json();
-      setInstitutions(data.institutions || []);
-    } catch (error) {
-      console.error("Error fetching institutions:", error);
-    }
-  };
-
-  const checkUserInstitution = async () => {
-    if (!currentAccount) return;
-    try {
-      console.log(
-        "[Frontend] Checking user institution for wallet:",
-        currentAccount.address
-      );
-      const response = await fetch(
-        `/api/institutions?wallet_address=${currentAccount.address}`
-      );
-      const data = await response.json();
-      console.log("[Frontend] Institution check response:", data);
-
-      if (data.institution) {
-        console.log("[Frontend] Found institution:", data.institution);
-        setUserInstitution(data.institution);
-      } else {
-        console.log("[Frontend] No institution found");
-        setUserInstitution(null);
-      }
-    } catch (error) {
-      console.error("[Frontend] Error checking institution:", error);
-      setUserInstitution(null);
     }
   };
 
@@ -591,18 +619,21 @@ export default function HomePage() {
     currentPage * itemsPerPage
   );
 
-  // Sửa lại hàm fetch transaction
+  // Fix transaction fetching
   const fetchTransaction = async () => {
     try {
       const response = await fetch("/api/transactions?type=mint_certificate");
       const data = await response.json();
       if (data.success && data.transactions) {
-        const txMap = data.transactions.reduce((acc: any, tx: any) => {
-          if (tx.description?.includes(`Mint certificate for`)) {
-            acc[tx.txHash] = tx;
-          }
-          return acc;
-        }, {});
+        const txMap = data.transactions.reduce(
+          (acc: Record<string, Transaction>, tx: Transaction) => {
+            if (tx.description?.includes("Mint certificate for")) {
+              acc[tx.txHash] = tx;
+            }
+            return acc;
+          },
+          {}
+        );
         setTransactionMap(txMap);
       }
     } catch (error) {
@@ -667,7 +698,8 @@ export default function HomePage() {
                       <Building className="h-8 w-8 text-gray-400 mb-2" />
                     </div>
                     <p className="text-sm text-gray-500">
-                      Vui lòng chuyển đến tab "Register Institution" để đăng ký
+                      Vui lòng chuyển đến tab &quot;Register Institution&quot;
+                      để đăng ký
                     </p>
                     <Button
                       onClick={checkUserInstitution}
@@ -859,7 +891,8 @@ export default function HomePage() {
                       <Wallet className="h-8 w-8 text-gray-400 mb-2" />
                     </div>
                     <p className="text-sm text-gray-500">
-                      Use the "Kết nối Ví Sui" button in the top navigation
+                      Use the &quot;Kết nối Ví Sui&quot; button in the top
+                      navigation
                     </p>
                   </div>
                 ) : (

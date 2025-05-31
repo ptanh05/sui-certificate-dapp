@@ -1,4 +1,5 @@
 import { ConnectButton, useWalletKit } from "@mysten/wallet-kit";
+import Image from "next/image";
 
 export default function Navbar() {
   const { currentAccount } = useWalletKit();
@@ -11,10 +12,13 @@ export default function Navbar() {
   return (
     <nav className="flex justify-between items-center p-4 bg-blue-600 text-white">
       <div className="flex items-center space-x-3">
-        <img
+        <Image
           src="/CertChain.png"
           alt="Logo"
-          className="h-12 w-12 rounded-full"
+          width={48}
+          height={48}
+          className="rounded-full"
+          priority
         />
         <h1 className="text-xl font-bold">SUI CERTIFICATE PLATFORM</h1>
       </div>
