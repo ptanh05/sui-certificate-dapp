@@ -1,0 +1,6 @@
+{
+  "network": "testnet",
+  "package_id": "YOUR_PACKAGE_ID_HERE",
+  "rpc_url": "https://fullnode.testnet.sui.io:443",
+  "faucet_url": "https://faucet.testnet.sui.io/gas"
+}
