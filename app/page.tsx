@@ -72,6 +72,9 @@ interface Transaction {
   wallet_address: string;
 }
 
+// Export interface để có thể dùng ở component khác
+export type { Institution };
+
 // Sử dụng getFullnodeUrl để xác định vị trí RPC (Devnet, Testnet, v.v.)
 const rpcUrl = getFullnodeUrl("testnet");
 
@@ -85,6 +88,7 @@ export default function HomePage() {
   const { currentAccount, signAndExecuteTransactionBlock } = useWalletKit();
   const [loading, setLoading] = useState(false);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [userInstitution, setUserInstitution] = useState<Institution | null>(
     null
   );
@@ -641,6 +645,10 @@ export default function HomePage() {
     }
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <Navbar />
@@ -1096,7 +1104,7 @@ export default function HomePage() {
 
           {/* Institutions Tab */}
           <TabsContent value="institutions">
-            <InstitutionList />
+            <InstitutionList institutions={institutions} />
           </TabsContent>
         </Tabs>
       </main>

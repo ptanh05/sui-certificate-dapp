@@ -2,64 +2,38 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { type Institution } from "@/app/page";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface Institution {
-  id: number;
-  institution_name: string;
-  email: string;
-  website: string;
-  created_at: string;
+interface InstitutionListProps {
+  institutions: Institution[];
 }
 
-export default function InstitutionList() {
-  const [institutions, setInstitutions] = useState<Institution[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchInstitutions = async () => {
-      try {
-        const res = await fetch("/api/institutions"); // ← đường dẫn tương ứng với file API bạn tạo
-        const data = await res.json();
-        setInstitutions(data.institutions || []);
-      } catch (error) {
-        console.error("Failed to fetch institutions:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInstitutions();
-  }, []);
-
-  if (loading) return <p>Loading institutions...</p>;
-
+export default function InstitutionList({
+  institutions,
+}: InstitutionListProps) {
   return (
-    <div className="p-4">
-      <h2 className="text-2xl font-bold mb-4">Registered Institutions</h2>
-      <ul className="space-y-3">
-        {institutions.map((inst) => (
-          <li key={inst.id} className="p-3 border rounded shadow-sm bg-white">
-            <p>
-              <strong>{inst.institution_name}</strong>
-            </p>
-            <p>Email: {inst.email}</p>
-            <p>
-              Website:{" "}
-              <a
-                href={inst.website}
-                target="_blank"
-                className="text-blue-600 underline"
-              >
-                {inst.website}
-              </a>
-            </p>
-            <p className="text-sm text-gray-500">
-              Created at: {new Date(inst.created_at).toLocaleString()}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Danh sách tổ chức</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {institutions.length === 0 ? (
+          <p className="text-center text-gray-500">Chưa có tổ chức nào</p>
+        ) : (
+          <div className="space-y-4">
+            {institutions.map((institution) => (
+              <div key={institution.id} className="p-4 border rounded-lg">
+                <h3 className="font-semibold">
+                  {institution.institution_name}
+                </h3>
+                <p className="text-sm text-gray-600">{institution.email}</p>
+                <p className="text-sm text-gray-600">{institution.website}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
