@@ -49,7 +49,12 @@ interface Certificate {
   issue_date: string;
   completion_date: string;
   description: string | null;
+  txHash: string;
   created_at: string;
+  object_id: string;
+  name: string;
+  url: string;
+  issuer_address: string;
 }
 
 interface Institution {
@@ -62,15 +67,18 @@ interface Institution {
 }
 
 interface Transaction {
-  txHash: string;
-  description?: string;
-  status: boolean;
+  id: number;
+  user_id: number;
   transaction_type: string;
-  wallet_address: string;
+  txHash: string | null;
+  status: boolean;
+  description: string | null;
+  created_at: string;
+  wallet_address?: string;
 }
 
 // Export interface để có thể dùng ở component khác
-export type { Institution };
+export type { Institution, Certificate, Transaction };
 
 export default function HomePage() {
   const { currentAccount, signAndExecuteTransactionBlock } = useWalletKit();
@@ -92,13 +100,54 @@ export default function HomePage() {
     Record<string, Transaction>
   >({});
 
-  // Define all functions first
+  // Khởi tạo state cho form tạo certificate
+  const defaultCertificateForm = {
+    recipient_name: "",
+    course_name: "",
+    institution: "",
+    issue_date: "",
+    completion_date: "",
+    description: "",
+    recipient_address: "",
+    name: "",
+    url: "",
+  };
+
+  const [certificateForm, setCertificateForm] = useState(
+    defaultCertificateForm
+  );
+
+  // Thêm state mới để lưu trữ file ảnh
+  const [certificateImageFile, setCertificateImageFile] = useState<File | null>(
+    null
+  );
+
+  // Thêm hàm kiểm tra ví người nhận
+  const validateRecipientAddress = (address: string) => {
+    if (!currentAccount) return false;
+    return address.toLowerCase() !== currentAccount.address.toLowerCase();
+  };
+
+  // --- Define all functions first (including those used in useEffect) ---
+
   const fetchCertificates = useCallback(async () => {
     if (!currentAccount) return;
     try {
       const response = await fetch("/api/certificates");
       const data = await response.json();
-      setCertificates(data.certificates || []);
+
+      if (!data.success) {
+        console.error("Error fetching certificates:", data.error);
+        return;
+      }
+
+      if (Array.isArray(data.certificates)) {
+        setCertificates(data.certificates);
+        console.log("Fetched certificates:", data.certificates.length);
+      } else {
+        console.error("Invalid certificates data format:", data);
+        setCertificates([]);
+      }
 
       try {
         const objects = await client.getOwnedObjects({
@@ -115,8 +164,40 @@ export default function HomePage() {
       }
     } catch (error) {
       console.error("Error fetching certificates:", error);
+      setCertificates([]);
     }
   }, [currentAccount]);
+
+  const fetchInstitutions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/institutions");
+      const data = await response.json();
+      setInstitutions(data.institutions || []);
+    } catch (error) {
+      console.error("Error fetching institutions:", error);
+    }
+  }, []);
+
+  const fetchTransaction = useCallback(async () => {
+    try {
+      const response = await fetch("/api/transactions?type=mint_certificate");
+      const data = await response.json();
+      if (data.success && data.transactions) {
+        const txMap = data.transactions.reduce(
+          (acc: Record<string, Transaction>, tx: Transaction) => {
+            if (tx.txHash && tx.description?.includes("Mint certificate for")) {
+              acc[tx.txHash] = tx;
+            }
+            return acc;
+          },
+          {}
+        );
+        setTransactionMap(txMap);
+      }
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+    }
+  }, []);
 
   const checkUserInstitution = useCallback(async () => {
     if (!currentAccount) return;
@@ -133,7 +214,16 @@ export default function HomePage() {
 
       if (data.institution) {
         console.log("[Frontend] Found institution:", data.institution);
-        setUserInstitution(data.institution);
+        const userInfo = data.institution;
+        const userInstitution = {
+          id: userInfo.id,
+          institution_name: userInfo.institution_name,
+          email: userInfo.email,
+          website: userInfo.website,
+          wallet_address: currentAccount.address,
+          created_at: userInfo.created_at,
+        };
+        setUserInstitution(userInstitution);
       } else {
         console.log("[Frontend] No institution found");
         setUserInstitution(null);
@@ -144,13 +234,41 @@ export default function HomePage() {
     }
   }, [currentAccount]);
 
-  const fetchInstitutions = useCallback(async () => {
+  const fetchUser = useCallback(async (wallet_address: string) => {
     try {
-      const response = await fetch("/api/institutions");
+      const response = await fetch(
+        `/api/users?wallet_address=${wallet_address}`
+      );
       const data = await response.json();
-      setInstitutions(data.institutions || []);
+      if (!response.ok) {
+        console.error("Error fetching user:", data.error);
+        return null;
+      }
+      return data.user;
     } catch (error) {
-      console.error("Error fetching institutions:", error);
+      console.error("Error fetching user:", error);
+      return null;
+    }
+  }, []);
+
+  const createUser = useCallback(async (wallet_address: string) => {
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_address,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        console.error("Error creating user:", data.error);
+        return null;
+      }
+      return data.user;
+    } catch (error) {
+      console.error("Error creating user:", error);
+      return null;
     }
   }, []);
 
@@ -198,7 +316,51 @@ export default function HomePage() {
     [currentAccount, signAndExecuteTransactionBlock]
   );
 
-  // Then define useEffect hooks
+  const filterCertificates = useCallback(() => {
+    // Use certificates, defaulting to an empty array if it's not a valid array
+    const certsToProcess = Array.isArray(certificates) ? certificates : [];
+    let filtered = [...certsToProcess]; // Now safe to spread certsToProcess
+
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (cert) =>
+          cert.course_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          cert.recipient_name
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase()) ||
+          cert.institution_name
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase()) ||
+          cert.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (selectedInstitution && selectedInstitution !== "all") {
+      filtered = filtered.filter(
+        (cert) => cert.institution_name === selectedInstitution
+      );
+    }
+
+    if (dateRange.start) {
+      filtered = filtered.filter(
+        (cert) => new Date(cert.issue_date) >= new Date(dateRange.start)
+      );
+    }
+    if (dateRange.end) {
+      filtered = filtered.filter(
+        (cert) => new Date(cert.issue_date) <= new Date(dateRange.end)
+      );
+    }
+
+    setFilteredCertificates(filtered);
+  }, [certificates, searchTerm, selectedInstitution, dateRange]);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  // --- Define useEffect hooks (now functions are defined before) ---
+
   useEffect(() => {
     if (currentAccount) {
       const fetchData = async () => {
@@ -216,6 +378,7 @@ export default function HomePage() {
     fetchCertificates,
     fetchInstitutions,
     checkUserInstitution,
+    fetchTransaction,
   ]);
 
   useEffect(() => {
@@ -229,7 +392,7 @@ export default function HomePage() {
       }
     };
     initializeUser();
-  }, [currentAccount]);
+  }, [currentAccount, fetchUser, createUser]);
 
   useEffect(() => {
     if (currentAccount) {
@@ -241,26 +404,10 @@ export default function HomePage() {
     }
   }, [currentAccount, checkUserInstitution]);
 
-  // Khởi tạo state cho form tạo certificate
-  const defaultCertificateForm = {
-    recipient_name: "",
-    course_name: "",
-    institution: "",
-    issue_date: "",
-    completion_date: "",
-    description: "",
-    recipient_address: "",
-  };
-
-  const [certificateForm, setCertificateForm] = useState(
-    defaultCertificateForm
-  );
-
-  // Thêm hàm kiểm tra ví người nhận
-  const validateRecipientAddress = (address: string) => {
-    if (!currentAccount) return false;
-    return address.toLowerCase() !== currentAccount.address.toLowerCase();
-  };
+  useEffect(() => {
+    filterCertificates();
+    // Dependencies should be states that affect filtering, not the function itself
+  }, [certificates, searchTerm, selectedInstitution, dateRange]);
 
   const handleCertificateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,8 +450,20 @@ export default function HomePage() {
     try {
       const tx = new TransactionBlock();
 
+      // Tạo tên certificate từ tên khóa học và người nhận
+      const certificateName = `${certificateForm.course_name} - ${certificateForm.recipient_name}`;
+      // Tạo URL certificate (placeholder)
+      // Lý tưởng là URL đến trang xem certificate chi tiết, có thể dùng object ID.
+      // Cần cập nhật logic này sau khi có objectId nếu URL phụ thuộc vào ID.
+      const certificateUrl = `https://your-app.com/certificates/`; // Placeholder, cần thêm objectId sau khi mint nếu cần
+
       // Log trước khi tạo transaction
       console.log("Form data:", certificateForm);
+      console.log("Generated Metadata:", {
+        name: certificateName,
+        // url: certificateUrl, // Không sử dụng certificateUrl tạo từ frontend nữa
+      }); // Log metadata được tạo
+
       const moveCall = {
         target: `${PACKAGE_ID}::${MODULE_NAME}::mint_certificate` as const,
         arguments: [
@@ -314,6 +473,8 @@ export default function HomePage() {
           tx.pure(certificateForm.issue_date || ""),
           tx.pure(certificateForm.completion_date || ""),
           tx.pure(certificateForm.description || "Digital Certificate"),
+          tx.pure(certificateName), // <-- Thêm tham số name
+          tx.pure(certificateForm.url), // <-- Vẫn truyền certificateForm.url (sẽ rỗng lúc đầu)
           tx.pure(certificateForm.recipient_address || currentAccount.address),
         ],
       };
@@ -338,28 +499,130 @@ export default function HomePage() {
 
       console.log("Certificate minted successfully, digest:", result.digest);
 
-      // Lấy object ID từ transaction effects
-      let objectId = `0x${Math.random().toString(16).substr(2, 40)}`;
-      if (result.effects?.created && result.effects.created.length > 0) {
-        objectId = result.effects.created[0].reference.objectId;
+      // --- START: Find Object ID by fetching owned objects ---
+      let objectId: string | undefined;
+
+      if (currentAccount && result.digest) {
+        try {
+          console.log(
+            "Attempting to find minted object for recipient:",
+            certificateForm.recipient_address
+          );
+          // Fetch objects owned by the recipient
+          const ownedObjects = await client.getOwnedObjects({
+            owner: certificateForm.recipient_address,
+            options: {
+              showContent: true, // Cần để kiểm tra type
+              showType: true,
+            },
+          });
+
+          console.log("Owned objects fetched:", ownedObjects);
+
+          // Filter to find the newly minted Certificate object
+          const mintedObject = ownedObjects.data.find(
+            (obj: SuiObjectResponse) => {
+              // Kiểm tra nếu object tồn tại, có data, và có type
+              const objectType = obj.data?.type;
+              if (obj.data && objectType) {
+                // Kiểm tra xem type có khớp với Certificate NFT của chúng ta không
+                // Định dạng type thường là PACKAGE_ID::MODULE_NAME::STRUCT_NAME
+                const expectedType = `${PACKAGE_ID}::${MODULE_NAME}::Certificate`;
+                // So sánh type (có thể cần điều chỉnh so sánh type tùy theo cách Sui hiển thị)
+                // Đôi khi có phiên bản module đi kèm trong type, ví dụ: 0x...::digital_certificate::Certificate:0:1
+                // Nên kiểm tra includes hoặc regex nếu so sánh chính xác không hoạt động
+                if (objectType.includes(expectedType)) {
+                  // Đây có thể là Certificate NFT.
+                  // Để chắc chắn hơn, có thể so sánh thêm các trường nội dung
+                  // nếu chúng có sẵn và duy nhất (ví dụ: recipient_name, course_name)
+                  // Tuy nhiên, API getOwnedObjects with showContent không phải lúc nào cũng trả về đầy đủ content ngay lập tức
+                  // Chúng ta tạm thời dựa vào type và giả định đối tượng mới nhất có type này là đúng
+                  return true; // Tìm thấy đối tượng có type khớp
+                }
+              }
+              return false; // Không khớp tiêu chí
+            }
+          );
+
+          if (mintedObject?.data?.objectId) {
+            objectId = mintedObject.data.objectId;
+            console.log("Successfully found minted Object ID:", objectId);
+          } else {
+            console.error(
+              "Could not find minted Certificate object among owned objects."
+            );
+          }
+        } catch (fetchOwnedError) {
+          console.error(
+            "Error fetching owned objects to find minted ID:",
+            fetchOwnedError
+          );
+        }
+      }
+
+      // --- END: Find Object ID by fetching owned objects ---
+
+      // Kiểm tra nếu không lấy được objectId (bằng cách fetch owned objects)
+      if (!objectId) {
+        console.error(
+          "Could not get Object ID after attempting to find among owned objects. Transaction result:",
+          result
+        );
+        alert(
+          "Certificate minted on chain, but could not retrieve Object ID from owned objects."
+        );
+        setLoading(false); // Dừng loading
+        return; // Dừng xử lý tiếp nếu không có objectId
+      }
+
+      console.log("Minted Object ID (found among owned objects):\n", objectId); // Log objectId đã tìm được
+
+      // Chuẩn bị FormData để gửi đến API backend
+      const formData = new FormData();
+      formData.append("object_id", objectId);
+      formData.append("recipient_name", certificateForm.recipient_name);
+      formData.append("course_name", certificateForm.course_name);
+      formData.append("institution_name", certificateForm.institution);
+      formData.append(
+        "recipient_wallet_address",
+        certificateForm.recipient_address
+      );
+      formData.append("issue_date", certificateForm.issue_date);
+      formData.append("completion_date", certificateForm.completion_date);
+      formData.append("description", certificateForm.description || "");
+      formData.append("name", certificateName);
+      formData.append("issuer_address", currentAccount.address);
+      formData.append("transaction_hash", result?.digest || "");
+
+      // Thêm file ảnh vào FormData nếu có
+      if (certificateImageFile) {
+        formData.append("image", certificateImageFile);
+        // Không gửi URL khi có file ảnh vì backend sẽ tạo URL từ file
+      } else if (certificateForm.url) {
+        // Chỉ gửi URL nếu có giá trị và không có file ảnh
+        formData.append("url", certificateForm.url);
       }
 
       // Lưu certificate vào cơ sở dữ liệu qua API
+      console.log("Sending certificate data:", {
+        object_id: objectId,
+        recipient_name: certificateForm.recipient_name,
+        course_name: certificateForm.course_name,
+        institution_name: certificateForm.institution,
+        recipient_wallet_address: certificateForm.recipient_address,
+        issue_date: certificateForm.issue_date,
+        completion_date: certificateForm.completion_date,
+        description: certificateForm.description,
+        name: certificateName,
+        url: certificateForm.url,
+        issuer_address: currentAccount.address,
+        transaction_hash: result?.digest,
+        has_image: !!certificateImageFile,
+      });
+
       const response = await fetch("/api/certificates", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          object_id: objectId,
-          recipient_name: certificateForm.recipient_name,
-          course_name: certificateForm.course_name,
-          institution_name: certificateForm.institution,
-          recipient_wallet_address: certificateForm.recipient_address,
-          issue_date: certificateForm.issue_date,
-          completion_date: certificateForm.completion_date,
-          description: certificateForm.description,
-          issuer_address: currentAccount.address,
-          transaction_hash: result?.digest || "",
-        }),
+        body: formData,
       });
 
       if (response.ok) {
@@ -372,7 +635,10 @@ export default function HomePage() {
           - Tổ chức: ${certificateForm.institution}
           - Ngày cấp: ${certificateForm.issue_date}
           - Ngày hoàn thành: ${certificateForm.completion_date}
+          - Tên NFT: ${certificateName}
+          - URL NFT: ${certificateUrl}
           - Mã giao dịch: ${result?.digest || "N/A"}
+          - Object ID: ${objectId}
         `;
         alert(successMessage);
         setCertificateForm(defaultCertificateForm);
@@ -387,9 +653,17 @@ export default function HomePage() {
             transaction_type: "mint_certificate",
             txHash: result.digest,
             status: true,
-            description: `Mint certificate for ${certificateForm.recipient_name} - ${certificateForm.course_name}`,
+            description: `Mint certificate for ${certificateForm.recipient_name} - ${certificateForm.course_name} (Object ID: ${objectId})`,
           }),
         });
+      } else {
+        // Xử lý lỗi khi lưu vào database
+        const errorData = await response.json();
+        console.error("Error saving certificate to database:", errorData);
+        alert(
+          "Certificate minted on chain, but failed to save to database: " +
+            (errorData.error || "Unknown error")
+        );
       }
     } catch (error: unknown) {
       console.error("Error creating certificate:", error);
@@ -490,25 +764,6 @@ export default function HomePage() {
       // Hiển thị thông báo phù hợp
       alert(data.message);
 
-      // Lưu transaction vào database
-      console.log("[Frontend] Saving transaction...");
-      const txResponse = await fetch("/api/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: currentAccount.address,
-          transaction_type: "create_institution",
-          txHash: result.digest,
-          status: true,
-          description: `Create/Update institution: ${institutionForm.institution_name}`,
-        }),
-      });
-
-      if (!txResponse.ok) {
-        const txData = await txResponse.json();
-        console.warn("[Frontend] Failed to save transaction:", txData);
-      }
-
       setInstitutionForm(defaultInstitutionForm);
       await fetchInstitutions();
       await checkUserInstitution();
@@ -521,121 +776,12 @@ export default function HomePage() {
     }
   };
 
-  // Lấy user theo wallet_address từ API
-  const fetchUser = async (wallet_address: string) => {
-    try {
-      const response = await fetch(
-        `/api/users?wallet_address=${wallet_address}`
-      );
-      const data = await response.json();
-      if (!response.ok) {
-        console.error("Error fetching user:", data.error);
-        return null;
-      }
-      return data.user; // API đã trả về user hoặc null
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      return null;
-    }
-  };
-
-  // Tạo user mới với wallet_address và thông tin bổ sung
-  const createUser = async (wallet_address: string) => {
-    try {
-      const response = await fetch("/api/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address,
-          institution_name: null,
-          email: null,
-          website: null,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        console.error("Error creating user:", data.error);
-        return null;
-      }
-      return data.user; // API trả về user mới hoặc user đã tồn tại
-    } catch (error) {
-      console.error("Error creating user:", error);
-      return null;
-    }
-  };
-
-  // Thêm hàm lọc certificates
-  const filterCertificates = useCallback(() => {
-    let filtered = [...certificates];
-
-    if (searchTerm) {
-      filtered = filtered.filter(
-        (cert) =>
-          cert.course_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          cert.recipient_name
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase()) ||
-          cert.institution_name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (selectedInstitution && selectedInstitution !== "all") {
-      filtered = filtered.filter(
-        (cert) => cert.institution_name === selectedInstitution
-      );
-    }
-
-    if (dateRange.start) {
-      filtered = filtered.filter(
-        (cert) => new Date(cert.issue_date) >= new Date(dateRange.start)
-      );
-    }
-    if (dateRange.end) {
-      filtered = filtered.filter(
-        (cert) => new Date(cert.issue_date) <= new Date(dateRange.end)
-      );
-    }
-
-    setFilteredCertificates(filtered);
-  }, [certificates, searchTerm, selectedInstitution, dateRange]);
-
-  // Cập nhật khi các điều kiện lọc thay đổi
-  useEffect(() => {
-    filterCertificates();
-  }, [filterCertificates]);
-
   // Tính toán phân trang
   const totalPages = Math.ceil(filteredCertificates.length / itemsPerPage);
   const paginatedCertificates = filteredCertificates.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-
-  // Fix transaction fetching
-  const fetchTransaction = async () => {
-    try {
-      const response = await fetch("/api/transactions?type=mint_certificate");
-      const data = await response.json();
-      if (data.success && data.transactions) {
-        const txMap = data.transactions.reduce(
-          (acc: Record<string, Transaction>, tx: Transaction) => {
-            if (tx.description?.includes("Mint certificate for")) {
-              acc[tx.txHash] = tx;
-            }
-            return acc;
-          },
-          {}
-        );
-        setTransactionMap(txMap);
-      }
-    } catch (error) {
-      console.error("Error fetching transactions:", error);
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -839,6 +985,45 @@ export default function HomePage() {
                           required
                         />
                       </div>
+
+                      <div>
+                        <Label htmlFor="name">Certificate Name</Label>
+                        <Input
+                          id="name"
+                          value={certificateForm.name}
+                          onChange={(e) =>
+                            setCertificateForm({
+                              ...certificateForm,
+                              name: e.target.value,
+                            })
+                          }
+                          placeholder="Enter certificate name"
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="image">
+                          Certificate Image (for URL)
+                        </Label>
+                        <Input
+                          id="image"
+                          type="file" // Thay đổi type thành file
+                          accept="image/*" // Chỉ chấp nhận các loại file ảnh
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              setCertificateImageFile(e.target.files[0]);
+                            } else {
+                              setCertificateImageFile(null);
+                            }
+                          }}
+                        />
+                        {/* Hiển thị tên file đã chọn (tùy chọn) */}
+                        {certificateImageFile && (
+                          <p className="text-sm text-gray-500 mt-1">
+                            Selected file: {certificateImageFile.name}
+                          </p>
+                        )}
+                      </div>
                     </div>
 
                     <div>
@@ -973,7 +1158,7 @@ export default function HomePage() {
                       <div className="relative">
                         <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
                         <Input
-                          placeholder="Tìm kiếm theo tên khóa học, người nhận..."
+                          placeholder="Tìm kiếm theo tên khóa học, người nhận, tên NFT..."
                           value={searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
                           className="pl-8"
@@ -990,7 +1175,11 @@ export default function HomePage() {
                       <SelectContent>
                         <SelectItem value="all">Tất cả tổ chức</SelectItem>
                         {Array.from(
-                          new Set(certificates.map((c) => c.institution_name))
+                          new Set(
+                            Array.isArray(certificates)
+                              ? certificates.map((c) => c.institution_name)
+                              : []
+                          )
                         ).map((inst) => (
                           <SelectItem key={inst} value={inst}>
                             {inst}
@@ -1008,7 +1197,7 @@ export default function HomePage() {
                             start: e.target.value,
                           }))
                         }
-                        className="w-[150px]"
+                        className="w-[150px] border rounded-md px-3 py-2"
                       />
                       <Input
                         type="date"
@@ -1019,7 +1208,7 @@ export default function HomePage() {
                             end: e.target.value,
                           }))
                         }
-                        className="w-[150px]"
+                        className="w-[150px] border rounded-md px-3 py-2"
                       />
                     </div>
                   </div>

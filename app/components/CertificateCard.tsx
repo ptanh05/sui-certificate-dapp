@@ -1,6 +1,14 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, FileText, Link, Wallet } from "lucide-react";
+import {
+  Calendar,
+  FileText,
+  Link,
+  Wallet,
+  Tag,
+  User,
+  Hash,
+} from "lucide-react";
 
 interface Certificate {
   id: number;
@@ -11,12 +19,23 @@ interface Certificate {
   issue_date: string;
   completion_date: string;
   description: string | null;
+  txHash: string;
   created_at: string;
+  object_id: string;
+  name: string;
+  url: string;
+  issuer_address: string;
 }
 
 interface Transaction {
-  description?: string;
-  // Thêm các trường khác của transaction nếu cần
+  id: number;
+  user_id: number;
+  transaction_type: string;
+  txHash: string | null;
+  status: boolean;
+  description: string | null;
+  created_at: string;
+  wallet_address?: string;
 }
 
 interface CertificateCardProps {
@@ -44,7 +63,20 @@ export default function CertificateCard({
     issue_date,
     completion_date,
     description,
+    txHash,
+    created_at,
+    object_id,
+    name,
+    url,
+    issuer_address,
   } = certificate;
+
+  const createdAtDate = new Date(created_at);
+  const formattedCreatedAt = isNaN(createdAtDate.getTime())
+    ? "N/A"
+    : createdAtDate.toLocaleDateString("vi-VN") +
+      " " +
+      createdAtDate.toLocaleTimeString("vi-VN");
 
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow">
@@ -65,7 +97,6 @@ export default function CertificateCard({
       </CardHeader>
 
       <CardContent className="p-4 pt-2">
-        {/* Thông tin chính */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div className="space-y-2">
             <div className="flex items-center text-gray-600">
@@ -80,6 +111,13 @@ export default function CertificateCard({
               <div>
                 <p className="font-medium">Ngày hoàn thành</p>
                 <p>{new Date(completion_date).toLocaleDateString("vi-VN")}</p>
+              </div>
+            </div>
+            <div className="flex items-center text-gray-600">
+              <Tag className="h-4 w-4 mr-2 flex-shrink-0" />
+              <div>
+                <p className="font-medium">Tên Certificate</p>
+                <p>{name || "N/A"}</p>
               </div>
             </div>
           </div>
@@ -123,6 +161,44 @@ export default function CertificateCard({
                 </div>
               </div>
             </div>
+            <div className="flex items-start text-gray-600">
+              <User className="h-4 w-4 mr-2 flex-shrink-0 mt-1" />
+              <div>
+                <p className="font-medium">Ví người cấp</p>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono">
+                    {shortenAddress(issuer_address)}
+                  </span>
+                  <button
+                    onClick={() => onCopy(issuer_address)}
+                    className="p-1 hover:bg-gray-100 rounded"
+                    title="Sao chép địa chỉ ví người cấp"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect
+                        x="9"
+                        y="9"
+                        width="13"
+                        height="13"
+                        rx="2"
+                        ry="2"
+                      ></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
             {description && (
               <div className="flex items-start text-gray-600">
                 <FileText className="h-4 w-4 mr-2 flex-shrink-0 mt-1" />
@@ -132,69 +208,101 @@ export default function CertificateCard({
                 </div>
               </div>
             )}
+            {url && (
+              <div className="flex items-start text-gray-600">
+                <Link className="h-4 w-4 mr-2 flex-shrink-0 mt-1" />
+                <div>
+                  <p className="font-medium">URL Certificate</p>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-sm"
+                  >
+                    {url}
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Transaction info */}
         <div className="mt-4 pt-4 border-t">
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-gray-500">ID: {id}</span>
-            <div className="flex items-center gap-2">
-              {Object.entries(transactionMap).map(
-                ([txHash, tx]: [string, Transaction]) => {
-                  const description = tx.description || "";
-                  if (
-                    description.includes(recipient_name) &&
-                    description.includes(course_name)
-                  ) {
-                    return (
-                      <div key={txHash} className="flex items-center gap-2">
-                        <div className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
-                          <span className="font-mono text-xs">
-                            {shortenAddress(txHash)}
-                          </span>
-                          <button
-                            onClick={() => onCopy(txHash)}
-                            className="p-1 hover:bg-gray-200 rounded"
-                            title="Sao chép transaction hash"
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <rect
-                                x="9"
-                                y="9"
-                                width="13"
-                                height="13"
-                                rx="2"
-                                ry="2"
-                              ></rect>
-                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                          </button>
-                        </div>
-                        <a
-                          href={`https://suiexplorer.com/txblock/${txHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs"
-                        >
-                          <Link className="h-3 w-3" />
-                          <span>Xem giao dịch</span>
-                        </a>
-                      </div>
-                    );
-                  }
-                  return null;
-                }
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-500">
+            <div className="space-y-1">
+              <p>
+                <strong>ID:</strong> {id}
+              </p>
+              <p>
+                <strong>Created At:</strong> {formattedCreatedAt}
+              </p>
+            </div>
+            <div className="space-y-1">
+              {object_id && (
+                <p>
+                  <strong>Object ID:</strong>{" "}
+                  <span className="font-mono">{shortenAddress(object_id)}</span>
+                  <button
+                    onClick={() => onCopy(object_id)}
+                    className="p-1 hover:bg-gray-200 rounded ml-1 align-middle"
+                    title="Sao chép Object ID"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect
+                        x="9"
+                        y="9"
+                        width="13"
+                        height="13"
+                        rx="2"
+                        ry="2"
+                      ></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </p>
+              )}
+              {txHash && (
+                <p>
+                  <strong>Tx Hash:</strong>{" "}
+                  <span className="font-mono">{shortenAddress(txHash)}</span>
+                  <button
+                    onClick={() => onCopy(txHash)}
+                    className="p-1 hover:bg-gray-200 rounded ml-1 align-middle"
+                    title="Sao chép Transaction Hash"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect
+                        x="9"
+                        y="9"
+                        width="13"
+                        height="13"
+                        rx="2"
+                        ry="2"
+                      ></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </p>
               )}
             </div>
           </div>
